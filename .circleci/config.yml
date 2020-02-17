@@ -9,8 +9,8 @@ jobs:
           name: testing Circle Ci PR merged
           command: |
             TOKEN="$GITHUB_TOKEN"
-            REPO="nca-plugins"
-            OWNER="wpcomvip"
+            REPO="ci-test"
+            OWNER="juankk"
 
             # CircleCI provides this value as the SHA of the triggering push.
             #CIRCLE_SHA1=""
