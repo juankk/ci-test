@@ -3,21 +3,88 @@ jobs:
   build:
     docker:
       - image: circleci/php:7.3
-      - image: circleci/mariadb:10.2
     steps:
       - checkout
-
-      # We are using a single Machine User user key for checking out, pulling and pushing to multiple repos
-      # So we don't need an additional add_ssh_keys step to facilitate additional SSH deploy keys
       - run:
           name: testing Circle Ci PR merged
           command: |
-            echo "R $CIRCLE_PULL_REQUEST"
-            echo "Rs $CIRCLE_PULL_REQUESTS"
-            echo "SHA $CIRCLE_SHA1"
+            TOKEN="$GITHUB_TOKEN"
+            REPO="nca-plugins"
+            OWNER="wpcomvip"
+
+            # CircleCI provides this value as the SHA of the triggering push.
+            #CIRCLE_SHA1=""
+
+            # Get the PULL number that's realted to the commit on this build
+            PULL=$(curl -H "Authorization: bearer ${TOKEN}" -s -d "{ \
+                \"query\": \"query { \
+                    repository(owner: \\\"$OWNER\\\", name: \\\"$REPO\\\") { \
+                        commit: object(expression: \\\"$CIRCLE_SHA1\\\") { \
+                            ... on Commit { \
+                                associatedPullRequests(first: 5) { \
+                                    edges { \
+                                        node { \
+                                            number \
+                                        } \
+                                    } \
+                                } \
+                            } \
+                        } \
+                    } \
+                } \
+            \"}" https://api.github.com/graphql)
+
+            echo $PULL
+            # Verify a Pull # was returned
+            REGEX_PULL="number\"\:([0-9]*)";
+            if [[ $PULL =~ $REGEX_PULL ]]; then
+                PULL_NUM=${BASH_REMATCH[1]}
+
+                # Get the last review on the PR that was APPROVED
+                REVIEW=$(curl -H "Authorization: bearer ${TOKEN}" -s -d "{ \
+                    \"query\": \"query { \
+                        repository(name: \\\"$REPO\\\", owner: \\\"$OWNER\\\") { \
+                            pullRequest(number: $PULL_NUM) { \
+                                id \
+                                reviews(last: 1, states: APPROVED) { \
+                                    edges { \
+                                        node { \
+                                        state \
+                                            author { \
+                                                login \
+                                            } \
+                                            createdAt \
+                                        } \
+                                    } \
+                                } \
+                            } \
+                        } \
+                    }\
+                \"}" https://api.github.com/graphql)
+
+                REGEX_USER="login\"\:\"([a-z0-9]*)\"";
+                if [[ $REVIEW =~ $REGEX_USER ]]; then
+                    REVIEW_USER=${BASH_REMATCH[1]}
+                else
+                    REVIEW_USER="<unknown>"
+                fi
+
+                REGEX_TIME="createdAt\"\:\"([0-9A-Z:-]*)\"";
+                if [[ $REVIEW =~ $REGEX_TIME ]]; then
+                    REVIEW_TIME=${BASH_REMATCH[1]}
+                else
+                    REVIEW_TIME="<unknown>"
+                fi
+
+                COMMIT_MSG="This commit is from CircleCI, triggered by a merge of https://github.com/$REPO/$OWNER/pull/$PULL_NUM approved by @$REVIEW_USER at $REVIEW_TIME"
+
+            else
+                COMMIT_MSG="This commit is from CircleCI, unable to associate $CIRCLE_SHA1 to a PR."
+            fi
+
+            echo $COMMIT_MSG
 
 workflows:
-  version: 2
   build-workflow:
     jobs:
       - build:
